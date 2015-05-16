@@ -3,10 +3,10 @@
 # To read pcb files, the pcb version (or the git source date) must be >= the file version
 FileVersion[20070407]
 
-PCB["" 600000 500000]
+PCB["" 269500 307800]
 
 Grid[1000.0 0 0 0]
-Cursor[283000 351000 0.000000]
+Cursor[0 0 0.000000]
 PolyArea[3100.006200]
 Thermal[0.500000]
 DRC[800 800 800 1000 2000 800]
@@ -787,6 +787,30 @@ Symbol['~' 1200]
 	SymbolLine[2000 3500 2500 3000 800]
 )
 Attribute("PCB::grid::unit" "mil")
+
+Element["hidename" "STANDOFF_HEX_n4" "H1" "unknown" 22600 107400 0 10000 0 100 ""]
+(
+	Pin[0 0 29368 2000 29968 12850 "screw" "1" ""]
+
+	)
+
+Element["hidename" "STANDOFF_HEX_n4" "H2" "unknown" 22600 264900 0 10000 0 100 ""]
+(
+	Pin[0 0 29368 2000 29968 12850 "screw" "1" ""]
+
+	)
+
+Element["hidename" "STANDOFF_HEX_n4" "H3" "unknown" 246900 107400 0 10000 0 100 ""]
+(
+	Pin[0 0 29368 2000 29968 12850 "screw" "1" ""]
+
+	)
+
+Element["hidename" "STANDOFF_HEX_n4" "H4" "unknown" 246900 264900 0 10000 0 100 ""]
+(
+	Pin[0 0 29368 2000 29968 12850 "screw" "1" ""]
+
+	)
 Layer(1 "top")
 (
 )
@@ -797,15 +821,15 @@ Layer(3 "outline")
 (
 	Line[15100 0 254400 0 1000 2000 "clearline"]
 	Line[3700 307800 265800 307800 1000 2000 "clearline"]
+	Line[0 193300 20000 193300 1000 2000 "clearline"]
+	Line[0 218300 20000 218300 1000 2000 "clearline"]
+	Line[269500 193300 249500 193300 1000 2000 "clearline"]
+	Line[269500 218300 249500 218300 1000 2000 "clearline"]
 	Arc[1406900 205800 1406900 1406900 1000 2000 4.158 -3.649 "clearline"]
 	Arc[1406900 205800 1406900 1406900 1000 2000 -0.509 -7.902 "clearline"]
 	Arc[-1137400 205800 1406900 1406900 1000 2000 175.842 3.649 "clearline"]
 	Arc[-1137400 205800 1406900 1406900 1000 2000 180.509 7.902 "clearline"]
-	Line[0 193300 20000 193300 1000 2000 "clearline"]
-	Line[0 218300 20000 218300 1000 2000 "clearline"]
 	Arc[20000 205800 12500 12500 1000 2000 90 180 "clearline"]
-	Line[269500 193300 249500 193300 1000 2000 "clearline"]
-	Line[269500 218300 249500 218300 1000 2000 "clearline"]
 	Arc[249500 205800 12500 12500 1000 2000 90 -180 "clearline"]
 )
 Layer(4 "silk")
