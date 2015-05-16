@@ -1,0 +1,4 @@
+schematics mrbw-sat.sch
+output-name ../pcb/mrbw-sat
+skip-m4
+elements-dir ../../../footprints
