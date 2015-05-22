@@ -131,7 +131,7 @@ symversion=0.1
 T 55950 46900 5 10 1 1 0 0 1
 value=11.0592MHz
 T 55100 46900 5 10 0 1 0 0 1
-footprint=crystal-hc49
+footprint=crystal-hc49-smt
 }
 N 55100 46700 55100 52100 4
 N 55800 46700 55800 51800 4
