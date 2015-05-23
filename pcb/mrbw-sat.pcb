@@ -6,11 +6,11 @@ FileVersion[20070407]
 PCB["" 269500 400000]
 
 Grid[500.0 0 0 0]
-Cursor[158000 330000 0.000000]
+Cursor[50000 147500 0.000000]
 PolyArea[3100.006200]
 Thermal[0.500000]
 DRC[800 800 800 800 2000 800]
-Flags("showdrc,rubberband,nameonpcb,uniquename,clearnew,snappin")
+Flags("showdrc,rubberband,nameonpcb,uniquename,clearnew,snappin,showmask")
 Groups("1,c:2,s:3")
 Styles["Signal,1000,3600,2000,1000:Power,2500,6000,3500,1000:Fat,4000,6000,3500,1000:Skinny,600,2402,1181,600"]
 
@@ -1175,7 +1175,7 @@ Element["" "0805" "R2" "287k" 192500 237500 -3150 -12650 0 100 ""]
 
 	)
 
-Element["" "LTC_DDB8" "U1" "unknown" 179000 258500 -14642 -2453 0 80 ""]
+Element["" "LTC_DDB8" "U1" "unknown" 179000 258500 -15642 -2953 0 100 ""]
 (
 	Pad[2953 -4528 2953 -2756 984 2000 1584 "_SHDN_" "1" "square"]
 	Pad[984 -4528 984 -2756 984 2000 1584 "FB" "2" "square"]
