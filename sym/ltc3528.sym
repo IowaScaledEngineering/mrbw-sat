@@ -18,7 +18,7 @@ pinnumber=2
 T 2430 1450 5 8 0 0 0 0 1
 pinseq=6
 T 2250 1400 5 10 1 1 0 7 1
-pinlabfsel=FB
+pinlabel=FB
 }
 T 2300 2850 5 10 1 1 0 6 1
 refdes=U?
