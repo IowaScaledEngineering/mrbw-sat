@@ -6,11 +6,11 @@ FileVersion[20070407]
 PCB["" 269500 400000]
 
 Grid[500.0 0 0 0]
-Cursor[50000 147500 0.000000]
+Cursor[269500 178500 0.000000]
 PolyArea[3100.006200]
 Thermal[0.500000]
 DRC[800 800 800 800 2000 800]
-Flags("showdrc,rubberband,nameonpcb,uniquename,clearnew,snappin,showmask")
+Flags("showdrc,rubberband,nameonpcb,uniquename,clearnew,snappin")
 Groups("1,c:2,s:3")
 Styles["Signal,1000,3600,2000,1000:Power,2500,6000,3500,1000:Fat,4000,6000,3500,1000:Skinny,600,2402,1181,600"]
 
@@ -1195,7 +1195,7 @@ Element["" "LTC_DDB8" "U1" "unknown" 179000 258500 -15642 -2953 0 100 ""]
 
 	)
 
-Element["" "0805" "C2" "10uF" 192500 258500 4350 -3150 0 100 ""]
+Element["" "0805" "C2" "10uF" 192500 258500 4850 -1150 0 100 ""]
 (
 	Pad[-393 3543 393 3543 5118 0 5718 "1" "1" "square"]
 	Pad[-393 -3543 393 -3543 5118 0 5718 "2" "2" "square"]
@@ -1842,10 +1842,10 @@ Layer(5 "silk")
 	Line[68000 100000 70000 102000 1000 2000 "clearline"]
 	Text[14000 360000 0 160 "Board Size: X = 2695mil, Y = 3078mil" "clearline"]
 	Text[14500 372500 0 160 "Check MP1 pinout" "clearline"]
-	Text[235500 242000 0 100 "VBAT" "clearline"]
-	Text[235500 222000 0 100 "GND" "clearline"]
 	Text[16000 382500 0 160 "LED polarity mark" "clearline"]
 	Text[125000 376000 0 160 "Remove Potentiometer circles" "clearline"]
+	Text[238000 242000 0 100 "VBAT" "clearline"]
+	Text[238000 222000 0 100 "GND" "clearline"]
 )
 NetList()
 (
