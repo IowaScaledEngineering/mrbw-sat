@@ -46,6 +46,14 @@ volatile uint8_t ticks;
 volatile uint16_t decisecs=0;
 volatile uint16_t update_decisecs=10;
 
+uint8_t readDipSwitch()
+{
+	uint8_t val = PINB & 0x07;
+	val |= 0x08 & (PIND>>1);
+	val |= 0x10 & (PINC>>1);
+	return val;
+}
+
 void initialize100HzTimer(void)
 {
 	// Set up timer 0 for 100Hz interrupts
@@ -251,6 +259,10 @@ void init(void)
 		eeprom_write_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR, mrbus_dev_addr);
 	}
 	
+	if (0x03 == mrbus_dev_addr)
+		mrbus_dev_addr = 0x20 + readDipSwitch();
+	
+	
 	update_decisecs = (uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) 
 		| (((uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H)) << 8);
 
@@ -266,10 +278,9 @@ void init(void)
 
 
 	// Setup ADC
-	ADMUX  = _BV(REFS0) | _BV(MUX1); // AVCC reference, ADC0 channel
+	ADMUX  = _BV(REFS0) | _BV(MUX2) | _BV(MUX1) | _BV(MUX0); // AVCC reference, ADC7 channel
 	ADCSRA = _BV(ADATE) | _BV(ADIF) | _BV(ADPS2) | _BV(ADPS1); // 128 prescaler
 	ADCSRB = 0x00;
-	DIDR0  = _BV(ADC2D); // Disable digital on PC0 / ADC0
 	throttlePot = 0;
 	ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF);
 }
@@ -288,10 +299,21 @@ int main(void)
 	// Application initialization
 	init();
 
-	DDRC &= ~(_BV(PC4) | _BV(PC5));
-	DDRD |= _BV(PD7);
+	DDRD |= _BV(PD7) | _BV(PD6) | _BV(PD5);
+	DDRC |= _BV(PC4) | _BV(PC0);
 	
 	PORTD &= ~_BV(PD7);
+
+	// Ground the bottom of the pot
+	PORTC &= ~_BV(PC0);
+
+	// Enable pullups for dip switch
+	PORTB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
+	PORTC |= _BV(PC5);	
+	PORTD |= _BV(PD4);
+
+	// Enable direction switch and aux switch pullups
+	PORTC |= _BV(PC3) | _BV(PC2) | _BV(PC1);
 
 	// Initialize a 100 Hz timer.
 	initialize100HzTimer();
@@ -307,11 +329,17 @@ int main(void)
 	{
 		wdt_reset();
 
-		if (0 == (PINC & 0x10))
+		switch (PINC & 0x0C)
 		{
-			dir = 1;
-		} else {
-			dir = 2;
+			case 0x08:
+				dir = 1;
+				break;
+			case 0x04:
+				dir = 2;
+				break;
+			case 0x0C:
+				dir = 0;
+				break;
 		}
 		
 		// Handle any packets that may have come in
@@ -329,7 +357,7 @@ int main(void)
 
 			lastThrottlePot = throttlePot;
 			txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-			txBuffer[MRBUS_PKT_DEST] = 0x50;
+			txBuffer[MRBUS_PKT_DEST] = 0xFF;
 			txBuffer[MRBUS_PKT_LEN] = 8;
 			txBuffer[5] = 'C';
 			txBuffer[6] = dir;
