@@ -5,7 +5,7 @@ File:     $Id: $
 License:  GNU General Public License v3
 
 LICENSE:
-    Copyright (C) 2014 Nathan Holmes
+    Copyright (C) 2015 Nathan Holmes
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -181,16 +181,16 @@ void PktHandler(void)
 		txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 		txBuffer[MRBUS_PKT_LEN] = 16;
 		txBuffer[MRBUS_PKT_TYPE] = 'v';
-		txBuffer[6]  = MRBUS_VERSION_WIRED;
-		txBuffer[7]  = 0; // Software Revision
-		txBuffer[8]  = 0; // Software Revision
-		txBuffer[9]  = 0; // Software Revision
-		txBuffer[10]  = 0; // Hardware Major Revision
+		txBuffer[6]  = MRBUS_VERSION_WIRELESS;
+		txBuffer[7]  = 0xFF & ((uint32_t)(GIT_REV))>>16; // Software Revision
+		txBuffer[8]  = 0xFF & ((uint32_t)(GIT_REV))>>8; // Software Revision
+		txBuffer[9]  = 0xFF & (GIT_REV); // Software Revision
+		txBuffer[10]  = 1; // Hardware Major Revision
 		txBuffer[11]  = 0; // Hardware Minor Revision
-		txBuffer[12] = 'T';
-		txBuffer[13] = 'M';
-		txBuffer[14] = 'P';
-		txBuffer[15] = 'L';
+		txBuffer[12] = 'S';
+		txBuffer[13] = 'A';
+		txBuffer[14] = 'T';
+		txBuffer[15] = ' ';
 		mrbusPktQueuePush(&mrbeeTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
 		goto PktIgnore;
 	}
@@ -293,8 +293,7 @@ int main(void)
 	
 	PORTD &= ~_BV(PD7);
 
-	// Initialize a 100 Hz timer.  See the definition for this function - you can
-	// remove it if you don't use it.
+	// Initialize a 100 Hz timer.
 	initialize100HzTimer();
 
 	// Initialize MRBus core

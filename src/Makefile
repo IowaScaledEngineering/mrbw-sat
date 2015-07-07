@@ -1,12 +1,12 @@
 #*************************************************************************
-#Title:    MRB-CI2 Makefile
+#Title:    MRBW-SAT Makefile
 #Authors:  Michael Petersen <railfan@drgw.net>
 #          Nathan Holmes <maverick@drgw.net>
-#File:     MRB-CI2 Makefile
+#File:     MRBW-SAT Makefile
 #License:  GNU General Public License v3
 #
 #LICENSE:
-#    Copyright (C) 2014 Nathan Holmes and Michael Petersen
+#    Copyright (C) 2015 Nathan Holmes and Michael Petersen
 #
 #    Derived from example WinAVR project Makefile
 #
@@ -33,15 +33,15 @@ FUSE_L  = 0xFF
 FUSE_H  = 0xD5
 FUSE_E  = 0xFF
 
-MRBUS_DIRECTORY=../../mrbus2/src
-#RINGBUFFER_DIRECTORY=../../libs/avr-ringbuffer
+GITREV := 'GIT_REV=0x$(shell git rev-parse --short=6 HEAD)L'
+
+MRBUS_DIRECTORY=./mrbus/src/
 PROGRAMMER_TYPE=avrispmkii
 #PROGRAMMER_TYPE=usbtiny
 PROGRAMMER_PORT=usb
 
 # MRBus
-DEFINES = -DMRBEE
-
+DEFINES = -DMRBEE -D$(GITREV)
 SRCS=$(BASE_NAME).c $(MRBUS_DIRECTORY)/mrbee-avr.c $(MRBUS_DIRECTORY)/mrbus-crc.c $(MRBUS_DIRECTORY)/mrbus-queue.c 
 INCS=$(MRBUS_DIRECTORY)/mrbee.h $(MRBUS_DIRECTORY)/mrbee-avr.h 
 
@@ -62,6 +62,7 @@ COMPILE = avr-gcc $(DEFINES) -DF_CPU=$(F_CPU) $(CFLAGS) $(LDFLAGS) -mmcu=$(DEVIC
 #COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE) -E -dM
 
 help:
+	@echo "make setup...... init/update git submodules"
 	@echo "make hex ....... build $(BASE_NAME).hex"
 	@echo "make flash ..... flash the firmware"
 	@echo "make fuse ...... flash the fuses"
@@ -71,6 +72,10 @@ help:
 	@echo "make clean ..... delete objects and hex file"
 	@echo "make release.... produce release tarball"
 	@echo "make terminal... open up avrdude terminal"
+
+setup:
+	git submodule init
+	git submodule update
 
 hex: $(BASE_NAME).hex
 
