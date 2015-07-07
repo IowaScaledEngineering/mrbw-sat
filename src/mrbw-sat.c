@@ -356,12 +356,17 @@ int main(void)
 			uint8_t txBuffer[MRBUS_BUFFER_SIZE];
 
 			lastThrottlePot = throttlePot;
+			lastDir = dir;
 			txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 			txBuffer[MRBUS_PKT_DEST] = 0xFF;
 			txBuffer[MRBUS_PKT_LEN] = 8;
 			txBuffer[5] = 'C';
 			txBuffer[6] = dir;
-			txBuffer[7] = lastThrottlePot;			
+			// Don't send a speed if we're in neutral
+			if (0 == dir)
+				txBuffer[7] = 0;
+			else
+				txBuffer[7] = lastThrottlePot;			
 			mrbusPktQueuePush(&mrbeeTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
 			decisecs = 0;
 		}
