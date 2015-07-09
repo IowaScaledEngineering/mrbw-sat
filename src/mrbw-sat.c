@@ -24,13 +24,13 @@ LICENSE:
 #include <avr/interrupt.h>
 #include <avr/eeprom.h>
 #include <avr/wdt.h>
+#include <avr/sleep.h>
 #include <util/delay.h>
 
 #include "mrbee.h"
 
 uint8_t mrbus_dev_addr = 0;
-uint8_t pkt_count = 0;
-
+volatile uint8_t pktTimeout = 0;
 
 // ******** Start 100 Hz Timer, 0.16% error version (Timer 0)
 // If you can live with a slightly less accurate timer, this one only uses Timer 0, leaving Timer 1 open
@@ -45,6 +45,8 @@ uint8_t pkt_count = 0;
 volatile uint8_t ticks;
 volatile uint16_t decisecs=0;
 volatile uint16_t update_decisecs=10;
+
+volatile uint8_t status = 0;
 
 uint8_t readDipSwitch()
 {
@@ -66,12 +68,154 @@ void initialize100HzTimer(void)
 	TIMSK0 |= _BV(OCIE0A);
 }
 
+typedef enum
+{
+	LED_OFF = 0x00,
+	LED_GREEN,
+	LED_RED,
+	LED_YELLOW,
+	LED_GREEN_SLOWBLINK,
+	LED_GREEN_FASTBLINK,
+	LED_RED_SLOWBLINK,
+	LED_RED_FASTBLINK,
+	LED_YELLOW_SLOWBLINK,
+	LED_YELLOW_FASTBLINK
+
+} LEDStatus;
+
+volatile LEDStatus led;
+
+volatile uint8_t sleepTimer;
+
+inline void ledGreenOff()
+{
+	PORTD &= ~_BV(PD6);
+}
+inline void ledGreenOn()
+{
+	PORTD |= _BV(PD6);
+}
+inline void ledRedOff()
+{
+	PORTD &= ~_BV(PD5);
+}
+inline void ledRedOn()
+{
+	PORTD |= _BV(PD5);
+}
+
+#define STATUS_READ_SWITCHES 0x01
+
 ISR(TIMER0_COMPA_vect)
 {
+	static uint8_t ledPhase = 0;
+	static uint16_t internalDeciSecs = 0;
+
+	status |= STATUS_READ_SWITCHES;
+
 	if (++ticks >= 10)
 	{
 		ticks = 0;
 		decisecs++;
+		internalDeciSecs++;
+		
+		if (pktTimeout)
+			pktTimeout--;
+		
+		if (internalDeciSecs >= 600)
+		{
+			// Things that happen on minutes
+			if (sleepTimer != 0)
+				sleepTimer--;
+			internalDeciSecs -= 600;
+		}
+
+		switch(++ledPhase)
+		{
+			case 1:
+			case 3:
+				switch(led)
+				{
+					case LED_GREEN_FASTBLINK:
+						ledGreenOn();
+						break;
+			
+					case LED_RED_FASTBLINK:			
+						ledRedOff();
+						break;
+
+					case LED_OFF:
+						ledRedOff();
+						ledGreenOff();
+					default:
+						break;
+				}
+				break;
+
+			case 2:
+				switch(led)
+				{
+					case LED_GREEN:
+					case LED_GREEN_SLOWBLINK:
+						ledGreenOn();
+						break;
+					case LED_GREEN_FASTBLINK:
+						ledGreenOff();
+						break;
+					case LED_RED:
+					case LED_RED_SLOWBLINK:
+						ledRedOn();
+						break;
+					case LED_RED_FASTBLINK:			
+						ledRedOff();
+						break;
+					default:
+						break;
+
+				}
+				break;
+
+			case 6:
+				switch(led)
+				{
+					case LED_GREEN_SLOWBLINK:
+						ledGreenOn();
+						break;
+					case LED_RED_SLOWBLINK:
+						ledRedOn();
+						break;
+					default:
+						break;
+
+				}
+				break;
+
+			case 4:
+			case 8:
+				switch(led)
+				{
+					case LED_GREEN:
+					case LED_GREEN_SLOWBLINK:
+					case LED_GREEN_FASTBLINK:
+						ledGreenOff();
+						break;
+
+					case LED_RED:
+					case LED_RED_SLOWBLINK:
+					case LED_RED_FASTBLINK:			
+						ledRedOff();
+						break;
+					default:
+						break;
+						
+				}
+				break;
+
+			case 10:
+				ledPhase = 0;
+				break;
+
+		}
 	}
 }
 
@@ -80,21 +224,56 @@ ISR(TIMER0_COMPA_vect)
 // **** Bus Voltage Monitor
 // Uncomment this block (and the ADC initialization in the init() function) if you want to continuously monitor bus voltage
 
-volatile uint8_t throttlePot=0;
+volatile uint8_t throttlePot = 0;
+volatile uint8_t batteryVoltage = 0;
 
 ISR(ADC_vect)
 {
-	static uint16_t throttlePotAccumulator=0;
-	static uint8_t thottlePotCount=0;
-
-	throttlePotAccumulator += ADC;
-	if (++thottlePotCount >= 64)
+	static uint16_t accumulator=0;
+	static uint8_t count=0;
+	static uint8_t state=0;
+	
+	if (1 == state)
 	{
-//		throttlePotAccumulator = ADC;
-		// Divide by 64 samples, and then whack off another 8 to drop it from 10 bits to 7
-		throttlePot = throttlePotAccumulator>>9;
-		throttlePotAccumulator = 0;
-		thottlePotCount = 0;
+		accumulator += ADC;
+		accumulator = 0;
+		count = 0;
+		state = 2;
+		return;
+	}
+	else if (3 == state)
+	{
+		accumulator += ADC;
+		accumulator = 0;
+		count = 0;
+		state = 0;
+		return;
+	}
+
+	accumulator += ADC;
+	if (++count >= 64)
+	{
+		if (0 == state)
+		{
+			// Measuring throttle pot
+			// Divide by 64 samples, and then whack off another 8 to drop it from 10 bits to 7
+			throttlePot = accumulator>>9;
+			ADMUX  = _BV(REFS0) | 0x06; // AVCC reference, ADC6 channel (battery voltage)
+			state = 1;
+		
+		} else if (2 == state) {
+			// Measuring battery voltage
+			// In 20mV increments
+			accumulator >>= 6; // Divide by 64 - get the average measurement
+			batteryVoltage = (uint8_t)((accumulator * 5) / 31);
+			ADMUX  = _BV(REFS0) | 0x07; // AVCC reference, ADC7 channel (throttle pot)
+			state = 0;
+		} else {
+			ADMUX  = _BV(REFS0) | 0x07; // AVCC reference, ADC7 channel (throttle pot)		
+			state = 3;
+		}
+		accumulator = 0;
+		count = 0;
 	}
 }
 
@@ -233,8 +412,6 @@ PktIgnore:
 
 void init(void)
 {
-	// FIXME:  Do any initialization you need to do here.
-	
 	// Clear watchdog (in the case of an 'X' packet reset)
 	MCUSR = 0;
 #ifdef ENABLE_WATCHDOG
@@ -248,7 +425,7 @@ void init(void)
 	wdt_disable();
 #endif	
 
-	pkt_count = 0;
+	pktTimeout = 0;
 
 	// Initialize MRBus address from EEPROM
 	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
@@ -285,16 +462,131 @@ void init(void)
 	ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF);
 }
 
-#define MRBUS_TX_BUFFER_DEPTH 2
-#define MRBUS_RX_BUFFER_DEPTH 2
+
+volatile uint8_t wdt_tripped=0;
+
+ISR(WDT_vect) 
+{
+	wdt_tripped=1;  // set global volatile variable
+}
+
+
+uint16_t system_sleep(uint16_t sleep_decisecs)
+{
+	uint16_t slept = 0;
+
+	while(slept < sleep_decisecs)
+	{
+		uint16_t remaining_sleep = sleep_decisecs - slept;
+		uint8_t planned_sleep = 80;
+		uint8_t wdtcsr_bits = _BV(WDIF) | _BV(WDIE);
+
+		if (remaining_sleep == 1)
+		{
+			wdtcsr_bits |= _BV(WDP1) | _BV(WDP0);
+			planned_sleep = 1;
+		}
+		else if (remaining_sleep <= 3)
+		{
+			wdtcsr_bits |= _BV(WDP2);
+			planned_sleep = 3;
+		}
+		else if (remaining_sleep <= 5)
+		{
+			wdtcsr_bits |= _BV(WDP2) | _BV(WDP0);
+			planned_sleep = 5;
+		}
+		else if (remaining_sleep <= 10)
+		{
+			wdtcsr_bits |= _BV(WDP2) | _BV(WDP1);
+			planned_sleep = 10;
+		}
+		else if (remaining_sleep <= 20)
+		{
+			wdtcsr_bits |= _BV(WDP2) | _BV(WDP1) | _BV(WDP0);
+			planned_sleep = 20;
+		}
+		else if (remaining_sleep <= 40)
+		{
+			wdtcsr_bits |= _BV(WDP3);
+			planned_sleep = 40;
+		}
+		else
+		{
+			wdtcsr_bits |= _BV(WDP3) | _BV(WDP0);
+			planned_sleep = 80;
+		}
+
+		// Procedure to reset watchdog and set it into interrupt mode only
+
+		cli();
+		set_sleep_mode(SLEEP_MODE_PWR_DOWN);      // set the type of sleep mode to use
+		sleep_enable();                           // enable sleep mode
+		wdt_reset();
+		MCUSR &= ~(_BV(WDRF));
+		WDTCSR |= _BV(WDE) | _BV(WDCE);
+		WDTCSR = wdtcsr_bits;
+
+		sei();
+
+		wdt_tripped = 0;
+		// Wrap this in a loop, so we go back to sleep unless the WDT woke us up
+		while (0 == wdt_tripped)
+			sleep_cpu();
+
+		wdt_reset();
+		WDTCSR |= _BV(WDIE); // Restore WDT interrupt mode
+		slept += planned_sleep;
+	}
+
+	sleep_disable();
+
+#ifdef ENABLE_WATCHDOG
+	// If you don't want the watchdog to do system reset, remove this chunk of code
+	wdt_reset();
+	MCUSR &= ~(_BV(WDRF));
+	WDTCSR |= _BV(WDE) | _BV(WDCE);
+	WDTCSR = _BV(WDE) | _BV(WDP2) | _BV(WDP1); // Set the WDT to system reset and 1s timeout
+	wdt_reset();
+#else
+	wdt_reset();
+	wdt_disable();
+#endif
+
+	return(slept);
+}
+
+
+#define MRBUS_TX_BUFFER_DEPTH 4
+#define MRBUS_RX_BUFFER_DEPTH 4
 
 MRBusPacket mrbusTxPktBufferArray[MRBUS_TX_BUFFER_DEPTH];
 MRBusPacket mrbusRxPktBufferArray[MRBUS_RX_BUFFER_DEPTH];
+
+uint8_t debounce(uint8_t debouncedState, uint8_t newInputs)
+{
+	static uint8_t clock_A=0, clock_B=0;
+	uint8_t delta = newInputs ^ debouncedState;   //Find all of the changes
+	uint8_t changes;
+
+	clock_A ^= clock_B;                     //Increment the counters
+	clock_B  = ~clock_B;
+
+	clock_A &= delta;                       //Reset the counters if no changes
+	clock_B &= delta;                       //were detected.
+
+	changes = ~((~delta) | clock_A | clock_B);
+	debouncedState ^= changes;
+	return(debouncedState);
+}
 
 int main(void)
 {
 	uint8_t lastThrottlePot = 0;	
 	uint8_t lastDir = 0, dir=0;
+	uint8_t funcButtons = 0, lastFuncButtons = 0;
+	
+	sleepTimer = 5;
 	
 	// Application initialization
 	init();
@@ -315,6 +607,8 @@ int main(void)
 	// Enable direction switch and aux switch pullups
 	PORTC |= _BV(PC3) | _BV(PC2) | _BV(PC1);
 
+	led = LED_GREEN_FASTBLINK;
+
 	// Initialize a 100 Hz timer.
 	initialize100HzTimer();
 
@@ -329,13 +623,22 @@ int main(void)
 	{
 		wdt_reset();
 
-		switch (PINC & 0x0C)
+		if (status & STATUS_READ_SWITCHES)
+		{
+			status &= ~STATUS_READ_SWITCHES;
+			funcButtons = debounce(funcButtons, PINC & 0x0E);
+		}
+
+
+		switch (funcButtons & 0x0C)
 		{
 			case 0x08:
 				dir = 1;
+				sleepTimer = 5;
 				break;
 			case 0x04:
 				dir = 2;
+				sleepTimer = 5;				
 				break;
 			case 0x0C:
 				dir = 0;
@@ -344,29 +647,47 @@ int main(void)
 		
 		// Handle any packets that may have come in
 		if (mrbusPktQueueDepth(&mrbeeRxQueue))
-			PktHandler();		
+		{
+			pktTimeout = 100;
+			PktHandler();
+		}
+		
+		if (batteryVoltage >= 55)
+		{
+			if (0 == pktTimeout)
+				led = LED_GREEN;
+			else
+				led = LED_GREEN_FASTBLINK;
+		}
+		else if (batteryVoltage >=50)
+			led = LED_RED;
+		else
+			led = LED_RED_FASTBLINK;
 		
 		// Transmission criteria...
 		// > 2 decisec from last transmission
 		// 
 		
-		if ((((throttlePot != lastThrottlePot || dir != lastDir) && decisecs > 1) || (decisecs >= update_decisecs))
+		if ((((throttlePot != lastThrottlePot || funcButtons != lastFuncButtons) && decisecs > 1) || (decisecs >= update_decisecs))
 				&& !(mrbusPktQueueFull(&mrbeeTxQueue)))
 		{
 			uint8_t txBuffer[MRBUS_BUFFER_SIZE];
 
 			lastThrottlePot = throttlePot;
+			lastFuncButtons = funcButtons;
 			lastDir = dir;
 			txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 			txBuffer[MRBUS_PKT_DEST] = 0xFF;
-			txBuffer[MRBUS_PKT_LEN] = 8;
+			txBuffer[MRBUS_PKT_LEN] = 10;
 			txBuffer[5] = 'C';
 			txBuffer[6] = dir;
 			// Don't send a speed if we're in neutral
 			if (0 == dir)
 				txBuffer[7] = 0;
 			else
-				txBuffer[7] = lastThrottlePot;			
+				txBuffer[7] = lastThrottlePot;
+			txBuffer[8] = ((funcButtons>>1) & 0x01) ^ 0x01;
+			txBuffer[9] = batteryVoltage;	
 			mrbusPktQueuePush(&mrbeeTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
 			decisecs = 0;
 		}
@@ -374,6 +695,47 @@ int main(void)
 		if (mrbusPktQueueDepth(&mrbeeTxQueue))
 		{
 			mrbeeTransmit();
+		}
+
+		while (0 == sleepTimer)
+		{
+			// Time to nod off
+			led = LED_OFF;
+
+
+			// Sleep the XBee
+			PORTD |= _BV(PD7);			
+
+
+			// Kill pull-ups
+			// Enable pullups for dip switch
+			PORTB &= ~(_BV(PB0) | _BV(PB1) | _BV(PB2));
+			PORTC &= ~_BV(PC5);	
+			PORTD &= ~_BV(PD4);
+			PORTC &= ~(_BV(PC1));
+
+			// Ground the bottom of the pot
+			PORTC |= _BV(PC0);
+
+			while (0x0C == (PINC & 0x0C))
+				system_sleep(10);
+
+			sleepTimer = 5;
+			
+			// Unsleep the XBee
+			PORTD &= ~_BV(PD7);			
+			// Ground the bottom of the pot
+			PORTC &= ~_BV(PC0);
+
+			// Enable pullups for dip switch
+			PORTB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
+			PORTC |= _BV(PC5);	
+			PORTD |= _BV(PD4);
+
+			// Enable direction switch and aux switch pullups
+			PORTC |= _BV(PC3) | _BV(PC2) | _BV(PC1);
+
+			
 		}
 	}
 }
