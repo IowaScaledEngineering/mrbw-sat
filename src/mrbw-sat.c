@@ -556,6 +556,66 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 	return(slept);
 }
 
+void setActivePortDirections()
+{
+	// Set XBee sleep control as output
+	DDRD |= _BV(PD7);
+
+	// Set LED pins as outputs	
+	DDRD |= _BV(PD6) | _BV(PD5);
+
+	// Set direction toggle common as output
+	DDRC |= _BV(PC4);
+
+	// Set pot bottom as output
+	DDRC |= _BV(PC0);
+	
+	// Ground the bottom of the pot
+	PORTC &= ~_BV(PC0);
+
+	// Enable pullups for dip switch
+	PORTB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
+	PORTC |= _BV(PC5);	
+	PORTD |= _BV(PD4);
+
+	// Enable direction switch and aux switch pullups
+	PORTC |= _BV(PC3) | _BV(PC2) | _BV(PC1);
+}
+
+void setSleepPortDirections()
+{
+
+	// Kill pull-ups for dip switch and aux button
+	PORTB &= ~(_BV(PB0) | _BV(PB1) | _BV(PB2));
+	PORTC &= ~_BV(PC5);	
+	PORTD &= ~_BV(PD4);
+	PORTC &= ~(_BV(PC1)); // Aux button
+
+
+	// Make DIP switch inputs outputs to prevent floating
+	DDRB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
+	DDRC |= _BV(PC5);
+	DDRD |= _BV(PD4);
+
+	// Make the aux button an input again
+	DDRC |= _BV(PC1);
+
+
+	// Raise bottom of pot to VCC to kill current drain
+	PORTC |= _BV(PC0);
+}
+
+void setXbeeSleep()
+{
+	PORTD |= _BV(PD7);
+}
+
+void setXbeeActive()
+{
+	// Unsleep the XBee
+	PORTD &= ~_BV(PD7);		
+}
+
 
 #define MRBUS_TX_BUFFER_DEPTH 4
 #define MRBUS_RX_BUFFER_DEPTH 4
@@ -583,29 +643,16 @@ uint8_t debounce(uint8_t debouncedState, uint8_t newInputs)
 int main(void)
 {
 	uint8_t lastThrottlePot = 0;	
-	uint8_t lastDir = 0, dir=0;
+	uint8_t dir=0;
 	uint8_t funcButtons = 0, lastFuncButtons = 0;
 	
 	sleepTimer = 5;
 	
 	// Application initialization
 	init();
+	setActivePortDirections();
+	setXbeeActive();
 
-	DDRD |= _BV(PD7) | _BV(PD6) | _BV(PD5);
-	DDRC |= _BV(PC4) | _BV(PC0);
-	
-	PORTD &= ~_BV(PD7);
-
-	// Ground the bottom of the pot
-	PORTC &= ~_BV(PC0);
-
-	// Enable pullups for dip switch
-	PORTB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
-	PORTC |= _BV(PC5);	
-	PORTD |= _BV(PD4);
-
-	// Enable direction switch and aux switch pullups
-	PORTC |= _BV(PC3) | _BV(PC2) | _BV(PC1);
 
 	led = LED_GREEN_FASTBLINK;
 
@@ -675,7 +722,6 @@ int main(void)
 
 			lastThrottlePot = throttlePot;
 			lastFuncButtons = funcButtons;
-			lastDir = dir;
 			txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 			txBuffer[MRBUS_PKT_DEST] = 0xFF;
 			txBuffer[MRBUS_PKT_LEN] = 10;
@@ -701,41 +747,23 @@ int main(void)
 		{
 			// Time to nod off
 			led = LED_OFF;
+			// Disable internal power-sucking peripherals
+			ADCSRA &= ~_BV(ADEN);
+	
+			setXbeeSleep();
+			setSleepPortDirections();
 
-
-			// Sleep the XBee
-			PORTD |= _BV(PD7);			
-
-
-			// Kill pull-ups
-			// Enable pullups for dip switch
-			PORTB &= ~(_BV(PB0) | _BV(PB1) | _BV(PB2));
-			PORTC &= ~_BV(PC5);	
-			PORTD &= ~_BV(PD4);
-			PORTC &= ~(_BV(PC1));
-
-			// Ground the bottom of the pot
-			PORTC |= _BV(PC0);
 
 			while (0x0C == (PINC & 0x0C))
 				system_sleep(10);
 
 			sleepTimer = 5;
 			
-			// Unsleep the XBee
-			PORTD &= ~_BV(PD7);			
-			// Ground the bottom of the pot
-			PORTC &= ~_BV(PC0);
+			// Re-enable chip internal bits (ADC, etc.)
+			ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF);
 
-			// Enable pullups for dip switch
-			PORTB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
-			PORTC |= _BV(PC5);	
-			PORTD |= _BV(PD4);
-
-			// Enable direction switch and aux switch pullups
-			PORTC |= _BV(PC3) | _BV(PC2) | _BV(PC1);
-
-			
+			setActivePortDirections();
+			setXbeeActive();
 		}
 	}
 }
