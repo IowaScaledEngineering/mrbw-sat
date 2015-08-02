@@ -60,7 +60,7 @@ void initialize100HzTimer(void)
 {
 	// Set up timer 0 for 100Hz interrupts
 	TCNT0 = 0;
-	OCR0A = 0xC2;
+	OCR0A = 0x6C;
 	ticks = 0;
 	decisecs = 0;
 	TCCR0A = _BV(WGM01);
@@ -573,6 +573,11 @@ void setActivePortDirections()
 	// Ground the bottom of the pot
 	PORTC &= ~_BV(PC0);
 
+	// Make DIP switch pins inputs, to revert what may have been done in sleep
+	DDRB &= ~(_BV(PB0) | _BV(PB1) | _BV(PB2));
+	DDRC &= ~_BV(PC5);
+	DDRD &= ~_BV(PD4);
+
 	// Enable pullups for dip switch
 	PORTB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
 	PORTC |= _BV(PC5);	
@@ -589,17 +594,11 @@ void setSleepPortDirections()
 	PORTB &= ~(_BV(PB0) | _BV(PB1) | _BV(PB2));
 	PORTC &= ~_BV(PC5);	
 	PORTD &= ~_BV(PD4);
-	PORTC &= ~(_BV(PC1)); // Aux button
 
-
-	// Make DIP switch inputs outputs to prevent floating
+	// Make DIP switch pins outputs to prevent floating
 	DDRB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
 	DDRC |= _BV(PC5);
 	DDRD |= _BV(PD4);
-
-	// Make the aux button an input again
-	DDRC |= _BV(PC1);
-
 
 	// Raise bottom of pot to VCC to kill current drain
 	PORTC |= _BV(PC0);
