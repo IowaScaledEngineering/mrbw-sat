@@ -591,7 +591,7 @@ void setActivePortDirections()
 	
 	// Drive /RTS low
 	PORTD &= ~(_BV(MRBEE_RTS));
-	DDRD += _BV(MRBEE_RTS);
+	DDRD |= _BV(MRBEE_RTS);
 }
 
 void setSleepPortDirections()
