@@ -30,7 +30,7 @@ LICENSE:
 #include "mrbee.h"
 
 // Sleep time in minutes
-#define SLEEP_TIME 1
+#define SLEEP_TIME 5
 
 uint8_t mrbus_dev_addr = 0;
 volatile uint8_t pktTimeout = 0;
