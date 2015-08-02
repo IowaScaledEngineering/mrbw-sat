@@ -649,8 +649,8 @@ int main(void)
 	sleepTimer = 5;
 	
 	// Application initialization
-	init();
 	setActivePortDirections();
+	init();
 	setXbeeActive();
 
 
