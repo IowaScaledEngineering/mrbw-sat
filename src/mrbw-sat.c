@@ -29,6 +29,9 @@ LICENSE:
 
 #include "mrbee.h"
 
+// Sleep time in minutes
+#define SLEEP_TIME 1
+
 uint8_t mrbus_dev_addr = 0;
 volatile uint8_t pktTimeout = 0;
 
@@ -585,6 +588,10 @@ void setActivePortDirections()
 
 	// Enable direction switch and aux switch pullups
 	PORTC |= _BV(PC3) | _BV(PC2) | _BV(PC1);
+	
+	// Drive /RTS low
+	PORTD &= ~(_BV(MRBEE_RTS));
+	DDRD += _BV(MRBEE_RTS);
 }
 
 void setSleepPortDirections()
@@ -602,6 +609,9 @@ void setSleepPortDirections()
 
 	// Raise bottom of pot to VCC to kill current drain
 	PORTC |= _BV(PC0);
+
+	// Drive /RTS high (pull-up in XBee?)
+	PORTD |= _BV(MRBEE_RTS);
 }
 
 void setXbeeSleep()
@@ -645,7 +655,7 @@ int main(void)
 	uint8_t dir=0;
 	uint8_t funcButtons = 0, lastFuncButtons = 0;
 	
-	sleepTimer = 5;
+	sleepTimer = SLEEP_TIME;
 	
 	// Application initialization
 	setActivePortDirections();
@@ -680,11 +690,11 @@ int main(void)
 		{
 			case 0x08:
 				dir = 1;
-				sleepTimer = 5;
+				sleepTimer = SLEEP_TIME;
 				break;
 			case 0x04:
 				dir = 2;
-				sleepTimer = 5;				
+				sleepTimer = SLEEP_TIME;
 				break;
 			case 0x0C:
 				dir = 0;
@@ -756,7 +766,7 @@ int main(void)
 			while (0x0C == (PINC & 0x0C))
 				system_sleep(10);
 
-			sleepTimer = 5;
+			sleepTimer = SLEEP_TIME;
 			
 			// Re-enable chip internal bits (ADC, etc.)
 			ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF);

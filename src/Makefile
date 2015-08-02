@@ -31,7 +31,7 @@ DEVICE  = atmega328p
 F_CPU   = 11059200	# Hz
 FUSE_L  = 0xFF
 FUSE_H  = 0xD1
-FUSE_E  = 0xFF
+FUSE_E  = 0x05
 
 GITREV := 'GIT_REV=0x$(shell git rev-parse --short=6 HEAD)L'
 
