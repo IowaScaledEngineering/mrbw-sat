@@ -29,8 +29,31 @@ LICENSE:
 
 #include "mrbee.h"
 
-// Sleep time in minutes
-#define SLEEP_TIME 5
+#define MRBUS_EE_DEVICE_SLEEP_TIMEOUT 0x10
+
+// Default sleep time in minutes
+#define DEFAULT_SLEEP_TIME 5
+
+// VBATT_OKAY is the battery voltage (in decivolts) above which the batteries are considered "fine"
+#define VBATT_OKAY  220 
+// VBATT_WARN is the battery voltage (in decivolts) above which the batteries are considered a warning, but not
+//  in critical shape.  This should *always* be less than VBATT_OKAY
+#define VBATT_WARN  200
+
+#define XBEE_SLEEP_PD             PD7
+#define LED_GREEN_PD              PD6
+#define LED_RED_PD                PD5
+
+#define THROTTLE_DIR_COMMON_PC    PC4
+#define THROTTLE_DIR_REVERSE_PC   PC3
+#define THROTTLE_DIR_FORWARD_PC   PC2
+#define THROTTLE_AUX_BUTTON_PC    PC1
+#define THROTTLE_POT_ENABLE_PC    PC0
+
+#define THROTTLE_DIR_FORWARD  (_BV(THROTTLE_DIR_REVERSE_PC))
+#define THROTTLE_DIR_REVERSE  (_BV(THROTTLE_DIR_FORWARD_PC))
+#define THROTTLE_DIR_IDLE     (_BV(THROTTLE_DIR_REVERSE_PC) | _BV(THROTTLE_DIR_FORWARD_PC))
+#define THROTTLE_DIR_MASK     (_BV(THROTTLE_DIR_REVERSE_PC) | _BV(THROTTLE_DIR_FORWARD_PC))
 
 uint8_t mrbus_dev_addr = 0;
 volatile uint8_t pktTimeout = 0;
@@ -48,8 +71,35 @@ volatile uint8_t pktTimeout = 0;
 volatile uint8_t ticks;
 volatile uint16_t decisecs=0;
 volatile uint16_t update_decisecs=10;
-
 volatile uint8_t status = 0;
+uint8_t sleep_tmr_reset_value;
+
+void enableAddressSwitch()
+{
+	// Make DIP switch pins inputs, to revert what may have been done in sleep
+	DDRB &= ~(_BV(PB0) | _BV(PB1) | _BV(PB2));
+	DDRC &= ~_BV(PC5);
+	DDRD &= ~_BV(PD4);
+
+	// Enable pullups for dip switch
+	PORTB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
+	PORTC |= _BV(PC5);	
+	PORTD |= _BV(PD4);
+}
+
+void disableAddressSwitch()
+{
+	// Kill pull-ups for dip switch and aux button
+	PORTB &= ~(_BV(PB0) | _BV(PB1) | _BV(PB2));
+	PORTC &= ~_BV(PC5);	
+	PORTD &= ~_BV(PD4);
+
+	// Make DIP switch pins outputs to prevent floating
+	DDRB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
+	DDRC |= _BV(PC5);
+	DDRD |= _BV(PD4);
+}
+
 
 uint8_t readDipSwitch()
 {
@@ -58,6 +108,27 @@ uint8_t readDipSwitch()
 	val |= 0x10 & (PINC>>1);
 	return val;
 }
+
+
+void createVersionPacket(uint8_t destAddr, uint8_t *buf)
+{
+	buf[MRBUS_PKT_DEST] = destAddr;
+	buf[MRBUS_PKT_SRC] = mrbus_dev_addr;
+	buf[MRBUS_PKT_LEN] = 16;
+	buf[MRBUS_PKT_TYPE] = 'v';
+	buf[6]  = MRBUS_VERSION_WIRELESS;
+	// Software Revision
+	buf[7]  = 0xFF & ((uint32_t)(GIT_REV))>>16; // Software Revision
+	buf[8]  = 0xFF & ((uint32_t)(GIT_REV))>>8; // Software Revision
+	buf[9]  = 0xFF & (GIT_REV); // Software Revision
+	buf[10]  = HWREV_MAJOR; // Hardware Major Revision
+	buf[11]  = HWREV_MINOR; // Hardware Minor Revision
+	buf[12] = 'S';
+	buf[13] = 'A';
+	buf[14] = 'T';
+	buf[15] = ' ';
+}
+
 
 void initialize100HzTimer(void)
 {
@@ -92,26 +163,119 @@ volatile uint8_t sleepTimer;
 
 inline void ledGreenOff()
 {
-	PORTD &= ~_BV(PD6);
+	PORTD &= ~_BV(LED_GREEN_PD);
 }
 inline void ledGreenOn()
 {
-	PORTD |= _BV(PD6);
+	PORTD |= _BV(LED_GREEN_PD);
 }
 inline void ledRedOff()
 {
-	PORTD &= ~_BV(PD5);
+	PORTD &= ~_BV(LED_RED_PD);
 }
 inline void ledRedOn()
 {
-	PORTD |= _BV(PD5);
+	PORTD |= _BV(LED_RED_PD);
 }
 
 #define STATUS_READ_SWITCHES 0x01
 
-ISR(TIMER0_COMPA_vect)
+
+void ledUpdate()
 {
 	static uint8_t ledPhase = 0;
+	switch(++ledPhase)
+	{
+		case 1:
+		case 3:
+			switch(led)
+			{
+				case LED_GREEN_FASTBLINK:
+					ledGreenOn();
+					break;
+		
+				case LED_RED_FASTBLINK:			
+					ledRedOn();
+					break;
+
+				case LED_OFF:
+					ledRedOff();
+					ledGreenOff();
+				default:
+					break;
+			}
+			break;
+
+		case 2:
+			switch(led)
+			{
+				case LED_GREEN:
+				case LED_GREEN_SLOWBLINK:
+					ledGreenOn();
+					break;
+				case LED_GREEN_FASTBLINK:
+					ledGreenOff();
+					break;
+				case LED_RED:
+				case LED_RED_SLOWBLINK:
+					ledRedOn();
+					break;
+				case LED_RED_FASTBLINK:			
+					ledRedOff();
+					break;
+				default:
+					break;
+
+			}
+			break;
+
+		case 6:
+			switch(led)
+			{
+				case LED_GREEN_SLOWBLINK:
+					ledGreenOn();
+					break;
+				case LED_RED_SLOWBLINK:
+					ledRedOn();
+					break;
+				default:
+					break;
+
+			}
+			break;
+
+		case 4:
+		case 8:
+			switch(led)
+			{
+				case LED_GREEN:
+				case LED_GREEN_SLOWBLINK:
+				case LED_GREEN_FASTBLINK:
+					ledGreenOff();
+					break;
+
+				case LED_RED:
+				case LED_RED_SLOWBLINK:
+				case LED_RED_FASTBLINK:			
+					ledRedOff();
+					break;
+				default:
+					break;
+					
+			}
+			break;
+
+		case 10:
+			ledGreenOff();
+			ledRedOff();
+			ledPhase = 0;
+			break;
+
+	}
+}
+
+ISR(TIMER0_COMPA_vect)
+{
 	static uint16_t internalDeciSecs = 0;
 
 	status |= STATUS_READ_SWITCHES;
@@ -133,147 +297,84 @@ ISR(TIMER0_COMPA_vect)
 			internalDeciSecs -= 600;
 		}
 
-		switch(++ledPhase)
-		{
-			case 1:
-			case 3:
-				switch(led)
-				{
-					case LED_GREEN_FASTBLINK:
-						ledGreenOn();
-						break;
-			
-					case LED_RED_FASTBLINK:			
-						ledRedOff();
-						break;
+		ledUpdate();
 
-					case LED_OFF:
-						ledRedOff();
-						ledGreenOff();
-					default:
-						break;
-				}
-				break;
-
-			case 2:
-				switch(led)
-				{
-					case LED_GREEN:
-					case LED_GREEN_SLOWBLINK:
-						ledGreenOn();
-						break;
-					case LED_GREEN_FASTBLINK:
-						ledGreenOff();
-						break;
-					case LED_RED:
-					case LED_RED_SLOWBLINK:
-						ledRedOn();
-						break;
-					case LED_RED_FASTBLINK:			
-						ledRedOff();
-						break;
-					default:
-						break;
-
-				}
-				break;
-
-			case 6:
-				switch(led)
-				{
-					case LED_GREEN_SLOWBLINK:
-						ledGreenOn();
-						break;
-					case LED_RED_SLOWBLINK:
-						ledRedOn();
-						break;
-					default:
-						break;
-
-				}
-				break;
-
-			case 4:
-			case 8:
-				switch(led)
-				{
-					case LED_GREEN:
-					case LED_GREEN_SLOWBLINK:
-					case LED_GREEN_FASTBLINK:
-						ledGreenOff();
-						break;
-
-					case LED_RED:
-					case LED_RED_SLOWBLINK:
-					case LED_RED_FASTBLINK:			
-						ledRedOff();
-						break;
-					default:
-						break;
-						
-				}
-				break;
-
-			case 10:
-				ledPhase = 0;
-				break;
-
-		}
 	}
 }
 
 // End of 100Hz timer
 
-// **** Bus Voltage Monitor
-// Uncomment this block (and the ADC initialization in the init() function) if you want to continuously monitor bus voltage
-
 volatile uint8_t throttlePot = 0;
 volatile uint8_t batteryVoltage = 0;
+
+typedef enum
+{
+	ADC_STATE_READ_THROTTLE  = 0,
+	ADC_STATE_START_VBATT    = 1,
+	ADC_STATE_READ_VBATT     = 2,
+	ADC_STATE_START_THROTTLE = 3
+} ADCState;
 
 ISR(ADC_vect)
 {
 	static uint16_t accumulator=0;
 	static uint8_t count=0;
-	static uint8_t state=0;
-	
-	if (1 == state)
-	{
-		accumulator += ADC;
-		accumulator = 0;
-		count = 0;
-		state = 2;
-		return;
-	}
-	else if (3 == state)
-	{
-		accumulator += ADC;
-		accumulator = 0;
-		count = 0;
-		state = 0;
-		return;
-	}
+	static ADCState state=0;
 
 	accumulator += ADC;
-	if (++count >= 64)
+	
+	switch(state)
 	{
-		if (0 == state)
+		case ADC_STATE_START_VBATT:
+			// Throw away the first conversion, as it starts
+			// with the wrong mux settings and therefore will
+			// actually be reading the throttle pot
+			accumulator = 0;
+			count = 0;
+			state = ADC_STATE_READ_VBATT;
+			return;
+
+		case ADC_STATE_START_THROTTLE:
+			// Throw away the first conversion, as it starts
+			// with the wrong mux settings and therefore will
+			// actually be reading the battery
+			accumulator = 0;
+			count = 0;
+			state = ADC_STATE_READ_THROTTLE;
+			return;
+
+		case ADC_STATE_READ_VBATT:
+		case ADC_STATE_READ_THROTTLE:
+			count++;
+			break;
+
+		default:
+			// Eh, what are we doing here?
+			ADMUX  = _BV(REFS0) | 0x07; // AVCC reference, ADC7 channel (throttle pot)
+			count = 0;
+			state = ADC_STATE_START_THROTTLE;
+			break;
+	
+	}
+
+	if (count >= 64)
+	{
+		if (ADC_STATE_READ_THROTTLE == state)
 		{
 			// Measuring throttle pot
 			// Divide by 64 samples, and then whack off another 8 to drop it from 10 bits to 7
 			throttlePot = accumulator>>9;
 			ADMUX  = _BV(REFS0) | 0x06; // AVCC reference, ADC6 channel (battery voltage)
-			state = 1;
+			state = ADC_STATE_START_VBATT;
 		
-		} else if (2 == state) {
+		} else if (ADC_STATE_READ_VBATT == state) {
 			// Measuring battery voltage
 			// In 20mV increments
 			accumulator >>= 6; // Divide by 64 - get the average measurement
 			batteryVoltage = (uint8_t)((accumulator * 5) / 31);
 			ADMUX  = _BV(REFS0) | 0x07; // AVCC reference, ADC7 channel (throttle pot)
-			state = 0;
-		} else {
-			ADMUX  = _BV(REFS0) | 0x07; // AVCC reference, ADC7 channel (throttle pot)		
-			state = 3;
+			state = ADC_STATE_START_THROTTLE;
+
 		}
 		accumulator = 0;
 		count = 0;
@@ -367,20 +468,7 @@ void PktHandler(void)
 	else if ('V' == rxBuffer[MRBUS_PKT_TYPE]) 
 	{
 		// Version
-		txBuffer[MRBUS_PKT_DEST] = rxBuffer[MRBUS_PKT_SRC];
-		txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-		txBuffer[MRBUS_PKT_LEN] = 16;
-		txBuffer[MRBUS_PKT_TYPE] = 'v';
-		txBuffer[6]  = MRBUS_VERSION_WIRELESS;
-		txBuffer[7]  = 0xFF & ((uint32_t)(GIT_REV))>>16; // Software Revision
-		txBuffer[8]  = 0xFF & ((uint32_t)(GIT_REV))>>8; // Software Revision
-		txBuffer[9]  = 0xFF & (GIT_REV); // Software Revision
-		txBuffer[10]  = 1; // Hardware Major Revision
-		txBuffer[11]  = 0; // Hardware Minor Revision
-		txBuffer[12] = 'S';
-		txBuffer[13] = 'A';
-		txBuffer[14] = 'T';
-		txBuffer[15] = ' ';
+		createVersionPacket(rxBuffer[MRBUS_PKT_SRC], txBuffer);
 		mrbusPktQueuePush(&mrbeeTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
 		goto PktIgnore;
 	}
@@ -395,10 +483,6 @@ void PktHandler(void)
 		while(1);  // Force a watchdog reset
 		sei();
 	}
-
-	// FIXME:  Insert code here to handle incoming packets specific
-	// to the device.
-
 	//*************** END PACKET HANDLER  ***************
 
 	
@@ -442,20 +526,34 @@ void init(void)
 	if (0x03 == mrbus_dev_addr)
 		mrbus_dev_addr = 0x20 + readDipSwitch();
 	
+	// We've read it, just go ahead and kill the address switch now to save power
+	disableAddressSwitch();
 	
 	update_decisecs = (uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) 
 		| (((uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H)) << 8);
 
+	if (0xFFFF == update_decisecs)
+	{
+		// It's uninitialized - go ahead and set it to 2 seconds
+		eeprom_write_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L, 20);
+		eeprom_write_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H, 0);
+	}
+
 	// This line assures that update_decisecs is at least 1
 	update_decisecs = max(1, update_decisecs);
-	
-	// FIXME: This line assures that update_decisecs is 2 seconds or less
-	// You probably don't want this, but it prevents new developers from wondering
-	// why their new node doesn't transmit (uninitialized eeprom will make the update
-	// interval 64k decisecs, or about 110 hours)  You'll probably want to make this
-	// something more sane for your node type, or remove it entirely.
+	// This assures we're firing off a packet at least every 2 seconds.  Greater than that in 
+	// a throttle is a bit ridiculous.
 	update_decisecs = min(20, update_decisecs);
 
+	// Read the number of minutes before sleeping from EEP and store it.  If it's not set (255)
+	// or not sane (0), set it to the default of five minutes.
+	
+	sleep_tmr_reset_value = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_SLEEP_TIMEOUT);
+	if (0xFF == sleep_tmr_reset_value || 0x00 == sleep_tmr_reset_value)
+	{
+		sleep_tmr_reset_value = DEFAULT_SLEEP_TIME;
+		eeprom_write_byte((uint8_t*)MRBUS_EE_DEVICE_SLEEP_TIMEOUT, sleep_tmr_reset_value);
+	}
 
 	// Setup ADC
 	ADMUX  = _BV(REFS0) | _BV(MUX2) | _BV(MUX1) | _BV(MUX0); // AVCC reference, ADC7 channel
@@ -562,32 +660,25 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 void setActivePortDirections()
 {
 	// Set XBee sleep control as output
-	DDRD |= _BV(PD7);
+	DDRD |= _BV(XBEE_SLEEP_PD);
 
 	// Set LED pins as outputs	
-	DDRD |= _BV(PD6) | _BV(PD5);
+	DDRD |= _BV(LED_GREEN_PD) | _BV(LED_RED_PD);
 
 	// Set direction toggle common as output
-	DDRC |= _BV(PC4);
+	DDRC |= _BV(THROTTLE_DIR_COMMON_PC);
 
 	// Set pot bottom as output
-	DDRC |= _BV(PC0);
+	DDRC |= _BV(THROTTLE_POT_ENABLE_PC);
+	
+	// Set aux button and direction switch sides as an input
+	DDRC &= ~(_BV(THROTTLE_AUX_BUTTON_PC) | _BV(THROTTLE_DIR_FORWARD_PC) | _BV(THROTTLE_DIR_REVERSE_PC));
 	
 	// Ground the bottom of the pot
-	PORTC &= ~_BV(PC0);
-
-	// Make DIP switch pins inputs, to revert what may have been done in sleep
-	DDRB &= ~(_BV(PB0) | _BV(PB1) | _BV(PB2));
-	DDRC &= ~_BV(PC5);
-	DDRD &= ~_BV(PD4);
-
-	// Enable pullups for dip switch
-	PORTB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
-	PORTC |= _BV(PC5);	
-	PORTD |= _BV(PD4);
+	PORTC &= ~_BV(THROTTLE_POT_ENABLE_PC);
 
 	// Enable direction switch and aux switch pullups
-	PORTC |= _BV(PC3) | _BV(PC2) | _BV(PC1);
+	PORTC |= _BV(THROTTLE_DIR_REVERSE_PC) | _BV(THROTTLE_DIR_FORWARD_PC) | _BV(THROTTLE_AUX_BUTTON_PC);
 	
 	// Drive /RTS low
 	PORTD &= ~(_BV(MRBEE_RTS));
@@ -596,19 +687,16 @@ void setActivePortDirections()
 
 void setSleepPortDirections()
 {
+	// Kill both LEDs just in case
+	ledGreenOff();
+	ledRedOff();
 
-	// Kill pull-ups for dip switch and aux button
-	PORTB &= ~(_BV(PB0) | _BV(PB1) | _BV(PB2));
-	PORTC &= ~_BV(PC5);	
-	PORTD &= ~_BV(PD4);
-
-	// Make DIP switch pins outputs to prevent floating
-	DDRB |= _BV(PB0) | _BV(PB1) | _BV(PB2);
-	DDRC |= _BV(PC5);
-	DDRD |= _BV(PD4);
+	// Set the aux button monitor to ground and then as an output
+	PORTC &= ~_BV(THROTTLE_AUX_BUTTON_PC);
+	DDRC |= _BV(THROTTLE_AUX_BUTTON_PC);
 
 	// Raise bottom of pot to VCC to kill current drain
-	PORTC |= _BV(PC0);
+	PORTC |= _BV(THROTTLE_POT_ENABLE_PC);
 
 	// Drive /RTS high (pull-up in XBee?)
 	PORTD |= _BV(MRBEE_RTS);
@@ -616,13 +704,13 @@ void setSleepPortDirections()
 
 void setXbeeSleep()
 {
-	PORTD |= _BV(PD7);
+	PORTD |= _BV(XBEE_SLEEP_PD);
 }
 
 void setXbeeActive()
 {
 	// Unsleep the XBee
-	PORTD &= ~_BV(PD7);		
+	PORTD &= ~_BV(XBEE_SLEEP_PD);		
 }
 
 
@@ -655,15 +743,14 @@ int main(void)
 	uint8_t dir=0;
 	uint8_t funcButtons = 0, lastFuncButtons = 0;
 	
-	sleepTimer = SLEEP_TIME;
-	
 	// Application initialization
 	setActivePortDirections();
+	enableAddressSwitch();
 	init();
 	setXbeeActive();
+	sleepTimer = sleep_tmr_reset_value;
 
-
-	led = LED_GREEN_FASTBLINK;
+	led = LED_OFF;
 
 	// Initialize a 100 Hz timer.
 	initialize100HzTimer();
@@ -675,6 +762,15 @@ int main(void)
 
 	sei();	
 
+	{
+		// Fire off initial reset version packet
+		uint8_t txBuffer[MRBUS_BUFFER_SIZE];
+		createVersionPacket(0xFF, txBuffer);
+		mrbusPktQueuePush(&mrbeeTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
+	}
+
+
+
 	while (1)
 	{
 		wdt_reset();
@@ -682,21 +778,21 @@ int main(void)
 		if (status & STATUS_READ_SWITCHES)
 		{
 			status &= ~STATUS_READ_SWITCHES;
-			funcButtons = debounce(funcButtons, PINC & 0x0E);
+			funcButtons = debounce(funcButtons, PINC & (THROTTLE_DIR_MASK | _BV(THROTTLE_AUX_BUTTON_PC)));
 		}
 
-
-		switch (funcButtons & 0x0C)
+		switch (funcButtons & THROTTLE_DIR_MASK)
 		{
-			case 0x08:
+			case THROTTLE_DIR_FORWARD:
 				dir = 1;
-				sleepTimer = SLEEP_TIME;
+				sleepTimer = sleep_tmr_reset_value;
 				break;
-			case 0x04:
+			case THROTTLE_DIR_REVERSE:
 				dir = 2;
-				sleepTimer = SLEEP_TIME;
+				sleepTimer = sleep_tmr_reset_value;
 				break;
-			case 0x0C:
+			case THROTTLE_DIR_IDLE:
+			default:
 				dir = 0;
 				break;
 		}
@@ -708,23 +804,27 @@ int main(void)
 			PktHandler();
 		}
 		
-		if (batteryVoltage >= 55)
+		if (batteryVoltage >= (VBATT_OKAY/2))
 		{
 			if (0 == pktTimeout)
 				led = LED_GREEN;
 			else
 				led = LED_GREEN_FASTBLINK;
 		}
-		else if (batteryVoltage >=50)
-			led = LED_RED;
-		else
+		else if (batteryVoltage >= (VBATT_WARN/2))
 			led = LED_RED_FASTBLINK;
+		else
+			led = LED_RED;
+
 		
 		// Transmission criteria...
-		// > 2 decisec from last transmission
-		// 
+		// > 2 decisec from last transmission and...
+		// current throttle reading is not the same as before and the direction is non-idle
+		// the function buttons changed
+		// *****  or *****
+		// it's been more than the transmission timeout
 		
-		if ((((throttlePot != lastThrottlePot || funcButtons != lastFuncButtons) && decisecs > 1) || (decisecs >= update_decisecs))
+		if ((((((throttlePot != lastThrottlePot) && (0 != dir)) || funcButtons != lastFuncButtons) && decisecs > 1) || (decisecs >= update_decisecs))
 				&& !(mrbusPktQueueFull(&mrbeeTxQueue)))
 		{
 			uint8_t txBuffer[MRBUS_BUFFER_SIZE];
@@ -762,11 +862,10 @@ int main(void)
 			setXbeeSleep();
 			setSleepPortDirections();
 
-
-			while (0x0C == (PINC & 0x0C))
+			while (THROTTLE_DIR_IDLE == (PINC & THROTTLE_DIR_MASK))
 				system_sleep(10);
 
-			sleepTimer = SLEEP_TIME;
+			sleepTimer = sleep_tmr_reset_value;
 			
 			// Re-enable chip internal bits (ADC, etc.)
 			ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF);
